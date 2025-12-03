@@ -93,6 +93,14 @@ Napi::Value SetCursor(const Napi::CallbackInfo& info) {
     return info.Env().Null();
 }
 
+// 7. 权限检查 (补充部分)
+Napi::Value CheckAuth(const Napi::CallbackInfo& info) {
+    // kAXTrustedCheckOptionPrompt: @YES 会在权限未被授予时自动触发系统弹窗
+    NSDictionary *options = @{(__bridge id)kAXTrustedCheckOptionPrompt: @YES};
+    bool trusted = AXIsProcessTrustedWithOptions((__bridge CFDictionaryRef)options);
+    return Napi::Boolean::New(info.Env(), trusted);
+}
+
 Napi::Object Init(Napi::Env env, Napi::Object exports) {
     exports.Set("moveMouse", Napi::Function::New(env, MoveMouse));
     exports.Set("clickMouse", Napi::Function::New(env, ClickMouse));
@@ -100,6 +108,8 @@ Napi::Object Init(Napi::Env env, Napi::Object exports) {
     exports.Set("scrollEvent", Napi::Function::New(env, ScrollEvent));
     exports.Set("warpMouse", Napi::Function::New(env, WarpMouse));
     exports.Set("setCursor", Napi::Function::New(env, SetCursor));
+    // 注册 checkAuth
+    exports.Set("checkAuth", Napi::Function::New(env, CheckAuth));
     return exports;
 }
 
