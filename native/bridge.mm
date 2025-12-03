@@ -85,11 +85,29 @@ Napi::Value WarpMouse(const Napi::CallbackInfo& info) {
     return info.Env().Null();
 }
 
-// 6. 光标显隐
+// 6. 光标显隐 (修复版：遍历所有显示器)
 Napi::Value SetCursor(const Napi::CallbackInfo& info) {
     bool visible = info[0].As<Napi::Boolean>().Value();
-    if (visible) CGDisplayShowCursor(kCGDirectMainDisplay);
-    else CGDisplayHideCursor(kCGDirectMainDisplay);
+    
+    // 获取当前活动显示器列表
+    CGDisplayCount displayCount;
+    CGGetActiveDisplayList(0, NULL, &displayCount);
+    
+    // 分配内存
+    CGDirectDisplayID *displays = (CGDirectDisplayID *)malloc(displayCount * sizeof(CGDirectDisplayID));
+    CGGetActiveDisplayList(displayCount, displays, &displayCount);
+    
+    // 遍历所有显示器设置光标状态
+    // Fix: 将 int 改为 CGDisplayCount 以消除类型不匹配警告
+    for (CGDisplayCount i = 0; i < displayCount; i++) {
+        if (visible) {
+            CGDisplayShowCursor(displays[i]);
+        } else {
+            CGDisplayHideCursor(displays[i]);
+        }
+    }
+    
+    free(displays);
     return info.Env().Null();
 }
 
