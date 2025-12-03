@@ -20,7 +20,7 @@ export function startMaster(native: any) {
   let isRemote = false;
 
   // 屏幕中心点
-  const { width, height } = screen.getPrimaryDisplay().size;
+  const { width, height } = screen.getPrimaryDisplay().size
   const centerX = Math.floor(width / 2);
   const centerY = Math.floor(height / 2);
 
@@ -33,7 +33,7 @@ export function startMaster(native: any) {
   
   // 新增：回正计时器与边界阈值
   let resetTimer: any = null;
-  const RESET_DELAY = 30; // 鼠标停止移动 30ms 后执行回正
+  const RESET_DELAY = 800; // 鼠标停止移动 30ms 后执行回正
   const EDGE_MARGIN = 100; // 距离屏幕边缘小于 100px 时强制回正（防止系统光标撞墙）
 
   const connect = () => {
@@ -53,7 +53,7 @@ export function startMaster(native: any) {
 
     if (isRemote) {
       console.log(">>> REMOTE MODE");
-      native.setCursor(false);
+      // native.setCursor(false);
       // 初始归位
       native.warpMouse(centerX, centerY);
       lastX = centerX;
@@ -148,6 +148,7 @@ export function startMaster(native: any) {
 
     // 4. 键盘
     else if (e.type === EVENT_TYPE.KEY_PRESSED || e.type === EVENT_TYPE.KEY_RELEASED) {
+      console.log(e)
       const isDown = e.type === EVENT_TYPE.KEY_PRESSED;
       let code = e.rawcode ?? e.keycode;
       socket.write(pack({ t: "k", k: code, d: isDown }));
