@@ -4,7 +4,6 @@ import { screen } from "electron";
 import { CONFIG } from "./main";
 
 export function startSlave(native: any) {
-  // 获取 Slave 的屏幕尺寸
   const primaryDisplay = screen.getPrimaryDisplay();
   const { width, height } = primaryDisplay.size;
   console.log(`Slave Screen Size: ${width}x${height}`);
@@ -19,20 +18,20 @@ export function startSlave(native: any) {
 
         for (const msg of msgs) {
             switch (msg.t) {
-              case "m": // Move (Absolute Proportional)
-                // msg.x 和 msg.y 是 0.0 - 1.0 的比例值
-                // 映射到 Slave 的实际分辨率
+              case "m": // Move
                 const absX = msg.x * width;
                 const absY = msg.y * height;
                 native.moveMouseAbs(absX, absY);
                 break;
               case "c": // Click
-                native.clickMouse(msg.b, msg.d);
+                // msg.b: button, msg.d: isDown, msg.cl: clickCount
+                // 默认 clickCount 为 1，防止 undefined
+                native.clickMouse(msg.b, msg.d, msg.cl || 1);
                 break;
               case "k": // Key
                 native.keyEvent(msg.k, msg.d);
                 break;
-              case "s": // Scroll (Delta based)
+              case "s": // Scroll
                 native.scrollEvent(msg.dy, msg.dx);
                 break;
             }

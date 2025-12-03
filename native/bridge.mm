@@ -11,7 +11,6 @@ Napi::Value MoveMouse(const Napi::CallbackInfo& info) {
     CGPoint current = CGEventGetLocation(event);
     CFRelease(event);
 
-    // 加上 Delta
     CGPoint newPos = CGPointMake(current.x + dx, current.y + dy);
     
     CGEventRef move = CGEventCreateMouseEvent(NULL, kCGEventMouseMoved, newPos, kCGMouseButtonLeft);
@@ -20,24 +19,24 @@ Napi::Value MoveMouse(const Napi::CallbackInfo& info) {
     return info.Env().Null();
 }
 
-// 1.1 新增：模拟鼠标移动 (接收 Absolute - 绝对坐标)
+// 1.1 模拟鼠标移动 (接收 Absolute - 绝对坐标)
 Napi::Value MoveMouseAbs(const Napi::CallbackInfo& info) {
     double x = info[0].As<Napi::Number>().DoubleValue();
     double y = info[1].As<Napi::Number>().DoubleValue();
 
     CGPoint newPos = CGPointMake(x, y);
     
-    // 使用 kCGEventMouseMoved 将光标移动到绝对位置
     CGEventRef move = CGEventCreateMouseEvent(NULL, kCGEventMouseMoved, newPos, kCGMouseButtonLeft);
     CGEventPost(kCGHIDEventTap, move);
     CFRelease(move);
     return info.Env().Null();
 }
 
-// 2. 模拟点击
+// 2. 模拟点击 (修复：支持 clickCount)
 Napi::Value ClickMouse(const Napi::CallbackInfo& info) {
     int btnCode = info[0].As<Napi::Number>().Int32Value(); 
     bool isDown = info[1].As<Napi::Boolean>().Value();
+    int clickCount = info[2].As<Napi::Number>().Int32Value(); // 新增参数：点击次数
     
     // UioHook定义: 1=Left, 2=Right, 3=Middle
     CGMouseButton btn = kCGMouseButtonLeft;
@@ -56,14 +55,18 @@ Napi::Value ClickMouse(const Napi::CallbackInfo& info) {
     CFRelease(event);
     
     CGEventRef click = CGEventCreateMouseEvent(NULL, type, pos, btn);
+    
+    // 关键修复：显式设置点击计数 (1=单击, 2=双击, 3=三击)
+    // 如果不设置，macOS 只能靠时间间隔猜测，网络延迟会导致猜测失败
+    CGEventSetIntegerValueField(click, kCGMouseEventClickState, clickCount);
+    
     CGEventPost(kCGHIDEventTap, click);
     CFRelease(click);
     return info.Env().Null();
 }
 
-// 3. 模拟键盘 (强制使用硬件码)
+// 3. 模拟键盘
 Napi::Value KeyEvent(const Napi::CallbackInfo& info) {
-    // 这里的 keyCode 必须是 macOS 的 Hardware Code
     int keyCode = info[0].As<Napi::Number>().Int32Value();
     bool isDown = info[1].As<Napi::Boolean>().Value();
     
@@ -73,16 +76,15 @@ Napi::Value KeyEvent(const Napi::CallbackInfo& info) {
     return info.Env().Null();
 }
 
-// 4. 模拟触控板滚动 (修复版)
+// 4. 模拟触控板滚动
 Napi::Value ScrollEvent(const Napi::CallbackInfo& info) {
     int dy = info[0].As<Napi::Number>().Int32Value();
     int dx = info[1].As<Napi::Number>().Int32Value();
 
-    // 关键修正: 使用 kCGScrollEventUnitPixel (0) 
-    // 参数: Source, Units, AxisCount, wheel1(Y), wheel2(X), wheel3
+    // 使用 Pixel 单位
     CGEventRef scroll = CGEventCreateScrollWheelEvent2(NULL, kCGScrollEventUnitPixel, 2, dy, dx, 0);
     
-    // 开启惯性模拟
+    // 关键：设置为连续滚动模式，这会让 macOS 启用平滑滚动算法
     CGEventSetIntegerValueField(scroll, kCGScrollWheelEventIsContinuous, 1);
     
     CGEventPost(kCGHIDEventTap, scroll);
@@ -90,7 +92,7 @@ Napi::Value ScrollEvent(const Napi::CallbackInfo& info) {
     return info.Env().Null();
 }
 
-// 5. 瞬移 (Warp) - 仅改变光标位置，不触发事件（部分程序可能不响应）
+// 5. 瞬移
 Napi::Value WarpMouse(const Napi::CallbackInfo& info) {
     double x = info[0].As<Napi::Number>().DoubleValue();
     double y = info[1].As<Napi::Number>().DoubleValue();
@@ -99,19 +101,13 @@ Napi::Value WarpMouse(const Napi::CallbackInfo& info) {
     return info.Env().Null();
 }
 
-// 6. 光标显隐 (修复版：遍历所有显示器)
+// 6. 光标显隐
 Napi::Value SetCursor(const Napi::CallbackInfo& info) {
     bool visible = info[0].As<Napi::Boolean>().Value();
-    
-    // 获取当前活动显示器列表
     CGDisplayCount displayCount;
     CGGetActiveDisplayList(0, NULL, &displayCount);
-    
-    // 分配内存
     CGDirectDisplayID *displays = (CGDirectDisplayID *)malloc(displayCount * sizeof(CGDirectDisplayID));
     CGGetActiveDisplayList(displayCount, displays, &displayCount);
-    
-    // 遍历所有显示器设置光标状态
     for (CGDisplayCount i = 0; i < displayCount; i++) {
         if (visible) {
             CGDisplayShowCursor(displays[i]);
@@ -119,7 +115,6 @@ Napi::Value SetCursor(const Napi::CallbackInfo& info) {
             CGDisplayHideCursor(displays[i]);
         }
     }
-    
     free(displays);
     return info.Env().Null();
 }
@@ -133,7 +128,7 @@ Napi::Value CheckAuth(const Napi::CallbackInfo& info) {
 
 Napi::Object Init(Napi::Env env, Napi::Object exports) {
     exports.Set("moveMouse", Napi::Function::New(env, MoveMouse));
-    exports.Set("moveMouseAbs", Napi::Function::New(env, MoveMouseAbs)); // Export new function
+    exports.Set("moveMouseAbs", Napi::Function::New(env, MoveMouseAbs));
     exports.Set("clickMouse", Napi::Function::New(env, ClickMouse));
     exports.Set("keyEvent", Napi::Function::New(env, KeyEvent));
     exports.Set("scrollEvent", Napi::Function::New(env, ScrollEvent));
