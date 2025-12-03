@@ -2,7 +2,7 @@
 #import <Cocoa/Cocoa.h>
 #import <ApplicationServices/ApplicationServices.h>
 
-// 1. 模拟鼠标移动 (接收 Delta)
+// 1. 模拟鼠标移动 (接收 Delta - 相对移动)
 Napi::Value MoveMouse(const Napi::CallbackInfo& info) {
     double dx = info[0].As<Napi::Number>().DoubleValue();
     double dy = info[1].As<Napi::Number>().DoubleValue();
@@ -14,6 +14,20 @@ Napi::Value MoveMouse(const Napi::CallbackInfo& info) {
     // 加上 Delta
     CGPoint newPos = CGPointMake(current.x + dx, current.y + dy);
     
+    CGEventRef move = CGEventCreateMouseEvent(NULL, kCGEventMouseMoved, newPos, kCGMouseButtonLeft);
+    CGEventPost(kCGHIDEventTap, move);
+    CFRelease(move);
+    return info.Env().Null();
+}
+
+// 1.1 新增：模拟鼠标移动 (接收 Absolute - 绝对坐标)
+Napi::Value MoveMouseAbs(const Napi::CallbackInfo& info) {
+    double x = info[0].As<Napi::Number>().DoubleValue();
+    double y = info[1].As<Napi::Number>().DoubleValue();
+
+    CGPoint newPos = CGPointMake(x, y);
+    
+    // 使用 kCGEventMouseMoved 将光标移动到绝对位置
     CGEventRef move = CGEventCreateMouseEvent(NULL, kCGEventMouseMoved, newPos, kCGMouseButtonLeft);
     CGEventPost(kCGHIDEventTap, move);
     CFRelease(move);
@@ -76,7 +90,7 @@ Napi::Value ScrollEvent(const Napi::CallbackInfo& info) {
     return info.Env().Null();
 }
 
-// 5. 瞬移 (Warp)
+// 5. 瞬移 (Warp) - 仅改变光标位置，不触发事件（部分程序可能不响应）
 Napi::Value WarpMouse(const Napi::CallbackInfo& info) {
     double x = info[0].As<Napi::Number>().DoubleValue();
     double y = info[1].As<Napi::Number>().DoubleValue();
@@ -98,7 +112,6 @@ Napi::Value SetCursor(const Napi::CallbackInfo& info) {
     CGGetActiveDisplayList(displayCount, displays, &displayCount);
     
     // 遍历所有显示器设置光标状态
-    // Fix: 将 int 改为 CGDisplayCount 以消除类型不匹配警告
     for (CGDisplayCount i = 0; i < displayCount; i++) {
         if (visible) {
             CGDisplayShowCursor(displays[i]);
@@ -111,9 +124,8 @@ Napi::Value SetCursor(const Napi::CallbackInfo& info) {
     return info.Env().Null();
 }
 
-// 7. 权限检查 (补充部分)
+// 7. 权限检查
 Napi::Value CheckAuth(const Napi::CallbackInfo& info) {
-    // kAXTrustedCheckOptionPrompt: @YES 会在权限未被授予时自动触发系统弹窗
     NSDictionary *options = @{(__bridge id)kAXTrustedCheckOptionPrompt: @YES};
     bool trusted = AXIsProcessTrustedWithOptions((__bridge CFDictionaryRef)options);
     return Napi::Boolean::New(info.Env(), trusted);
@@ -121,12 +133,12 @@ Napi::Value CheckAuth(const Napi::CallbackInfo& info) {
 
 Napi::Object Init(Napi::Env env, Napi::Object exports) {
     exports.Set("moveMouse", Napi::Function::New(env, MoveMouse));
+    exports.Set("moveMouseAbs", Napi::Function::New(env, MoveMouseAbs)); // Export new function
     exports.Set("clickMouse", Napi::Function::New(env, ClickMouse));
     exports.Set("keyEvent", Napi::Function::New(env, KeyEvent));
     exports.Set("scrollEvent", Napi::Function::New(env, ScrollEvent));
     exports.Set("warpMouse", Napi::Function::New(env, WarpMouse));
     exports.Set("setCursor", Napi::Function::New(env, SetCursor));
-    // 注册 checkAuth
     exports.Set("checkAuth", Napi::Function::New(env, CheckAuth));
     return exports;
 }
