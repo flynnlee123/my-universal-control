@@ -3,6 +3,7 @@ import * as net from "net";
 import { pack } from "msgpackr";
 import { uIOhook } from "uiohook-napi";
 import { CONFIG } from "./main";
+import { UIOHOOK_TO_MAC_MAP } from "./keymap";
 
 // UioHook Event Constants
 const EVENT_TYPE = {
@@ -20,17 +21,17 @@ export function startMaster(native: any) {
   let isRemote = false;
 
   // 屏幕中心点
-  const { width, height } = screen.getPrimaryDisplay().size
+  const { width, height } = screen.getPrimaryDisplay().size;
   const centerX = Math.floor(width / 2);
   const centerY = Math.floor(height / 2);
 
   // 状态变量
   let lastX = centerX;
   let lastY = centerY;
-  
+
   // 核心优化：防抖动与幽灵事件过滤
   let isResetting = false; // 是否正在等待瞬移完成
-  
+
   // 新增：回正计时器与边界阈值
   let resetTimer: any = null;
   const RESET_DELAY = 800; // 鼠标停止移动 30ms 后执行回正
@@ -110,13 +111,17 @@ export function startMaster(native: any) {
       }
 
       // --- 新逻辑：防抖回正 ---
-      
+
       // 清除之前的定时器
       if (resetTimer) clearTimeout(resetTimer);
 
       // 边界保护：如果快撞墙了，立即回正，防止 dx 变为 0
-      if (e.x < EDGE_MARGIN || e.x > width - EDGE_MARGIN || 
-          e.y < EDGE_MARGIN || e.y > height - EDGE_MARGIN) {
+      if (
+        e.x < EDGE_MARGIN ||
+        e.x > width - EDGE_MARGIN ||
+        e.y < EDGE_MARGIN ||
+        e.y > height - EDGE_MARGIN
+      ) {
         resetToCenter();
       } else {
         // 正常情况：只有当鼠标停止动作（无滑动）超过阈值时才回正
@@ -135,22 +140,31 @@ export function startMaster(native: any) {
     else if (e.type === EVENT_TYPE.MOUSE_WHEEL) {
       let delta = e.rotation;
       if (e.amount && e.amount > 0) delta *= e.amount;
-      
-      // 调整灵敏度
-      delta = delta * 5;
 
-      if (e.direction === 3) { // Vertical
+      // 调整灵敏度，并取反方向 (Fix: Up is Down issue)
+      delta = delta * -5;
+
+      if (e.direction === 3) {
+        // Vertical
         socket.write(pack({ t: "s", dy: delta, dx: 0 }));
-      } else if (e.direction === 4) { // Horizontal
+      } else if (e.direction === 4) {
+        // Horizontal
         socket.write(pack({ t: "s", dy: 0, dx: delta }));
       }
     }
 
     // 4. 键盘
-    else if (e.type === EVENT_TYPE.KEY_PRESSED || e.type === EVENT_TYPE.KEY_RELEASED) {
-      console.log(e)
+    else if (
+      e.type === EVENT_TYPE.KEY_PRESSED ||
+      e.type === EVENT_TYPE.KEY_RELEASED
+    ) {
       const isDown = e.type === EVENT_TYPE.KEY_PRESSED;
-      let code = e.rawcode ?? e.keycode;
+
+      // Fix: 键盘映射错误 (Backspace=14 -> e)
+      // 优先使用查表得到的 macOS Hardware Code，如果未定义则回退到 rawcode/keycode
+      const code = e.rawcode ?? UIOHOOK_TO_MAC_MAP[e.keycode];
+
+      // console.log(`Key: ${e.keycode} -> ${code}`);
       socket.write(pack({ t: "k", k: code, d: isDown }));
     }
   });
