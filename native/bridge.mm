@@ -2,43 +2,25 @@
 #import <Cocoa/Cocoa.h>
 #import <ApplicationServices/ApplicationServices.h>
 
-// 1. 模拟鼠标移动 (接收 Delta - 相对移动)
-Napi::Value MoveMouse(const Napi::CallbackInfo& info) {
-    double dx = info[0].As<Napi::Number>().DoubleValue();
-    double dy = info[1].As<Napi::Number>().DoubleValue();
+// ===========================
+// 原有功能保持不变
+// ===========================
 
-    CGEventRef event = CGEventCreate(NULL);
-    CGPoint current = CGEventGetLocation(event);
-    CFRelease(event);
-
-    CGPoint newPos = CGPointMake(current.x + dx, current.y + dy);
-    
-    CGEventRef move = CGEventCreateMouseEvent(NULL, kCGEventMouseMoved, newPos, kCGMouseButtonLeft);
-    CGEventPost(kCGHIDEventTap, move);
-    CFRelease(move);
-    return info.Env().Null();
-}
-
-// 1.1 模拟鼠标移动 (接收 Absolute - 绝对坐标)
 Napi::Value MoveMouseAbs(const Napi::CallbackInfo& info) {
     double x = info[0].As<Napi::Number>().DoubleValue();
     double y = info[1].As<Napi::Number>().DoubleValue();
-
     CGPoint newPos = CGPointMake(x, y);
-    
     CGEventRef move = CGEventCreateMouseEvent(NULL, kCGEventMouseMoved, newPos, kCGMouseButtonLeft);
     CGEventPost(kCGHIDEventTap, move);
     CFRelease(move);
     return info.Env().Null();
 }
 
-// 2. 模拟点击 (修复：支持 clickCount)
 Napi::Value ClickMouse(const Napi::CallbackInfo& info) {
     int btnCode = info[0].As<Napi::Number>().Int32Value(); 
     bool isDown = info[1].As<Napi::Boolean>().Value();
-    int clickCount = info[2].As<Napi::Number>().Int32Value(); // 新增参数：点击次数
+    int clickCount = info[2].As<Napi::Number>().Int32Value();
     
-    // UioHook定义: 1=Left, 2=Right, 3=Middle
     CGMouseButton btn = kCGMouseButtonLeft;
     CGEventType type = isDown ? kCGEventLeftMouseDown : kCGEventLeftMouseUp;
     
@@ -55,44 +37,31 @@ Napi::Value ClickMouse(const Napi::CallbackInfo& info) {
     CFRelease(event);
     
     CGEventRef click = CGEventCreateMouseEvent(NULL, type, pos, btn);
-    
-    // 关键修复：显式设置点击计数 (1=单击, 2=双击, 3=三击)
-    // 如果不设置，macOS 只能靠时间间隔猜测，网络延迟会导致猜测失败
     CGEventSetIntegerValueField(click, kCGMouseEventClickState, clickCount);
-    
     CGEventPost(kCGHIDEventTap, click);
     CFRelease(click);
     return info.Env().Null();
 }
 
-// 3. 模拟键盘
 Napi::Value KeyEvent(const Napi::CallbackInfo& info) {
     int keyCode = info[0].As<Napi::Number>().Int32Value();
     bool isDown = info[1].As<Napi::Boolean>().Value();
-    
     CGEventRef key = CGEventCreateKeyboardEvent(NULL, (CGKeyCode)keyCode, isDown);
     CGEventPost(kCGHIDEventTap, key);
     CFRelease(key);
     return info.Env().Null();
 }
 
-// 4. 模拟触控板滚动
 Napi::Value ScrollEvent(const Napi::CallbackInfo& info) {
     int dy = info[0].As<Napi::Number>().Int32Value();
     int dx = info[1].As<Napi::Number>().Int32Value();
-
-    // 使用 Pixel 单位
     CGEventRef scroll = CGEventCreateScrollWheelEvent2(NULL, kCGScrollEventUnitPixel, 2, dy, dx, 0);
-    
-    // 关键：设置为连续滚动模式，这会让 macOS 启用平滑滚动算法
     CGEventSetIntegerValueField(scroll, kCGScrollWheelEventIsContinuous, 1);
-    
     CGEventPost(kCGHIDEventTap, scroll);
     CFRelease(scroll);
     return info.Env().Null();
 }
 
-// 5. 瞬移
 Napi::Value WarpMouse(const Napi::CallbackInfo& info) {
     double x = info[0].As<Napi::Number>().DoubleValue();
     double y = info[1].As<Napi::Number>().DoubleValue();
@@ -101,7 +70,6 @@ Napi::Value WarpMouse(const Napi::CallbackInfo& info) {
     return info.Env().Null();
 }
 
-// 6. 光标显隐
 Napi::Value SetCursor(const Napi::CallbackInfo& info) {
     bool visible = info[0].As<Napi::Boolean>().Value();
     CGDisplayCount displayCount;
@@ -119,15 +87,80 @@ Napi::Value SetCursor(const Napi::CallbackInfo& info) {
     return info.Env().Null();
 }
 
-// 7. 权限检查
 Napi::Value CheckAuth(const Napi::CallbackInfo& info) {
     NSDictionary *options = @{(__bridge id)kAXTrustedCheckOptionPrompt: @YES};
     bool trusted = AXIsProcessTrustedWithOptions((__bridge CFDictionaryRef)options);
     return Napi::Boolean::New(info.Env(), trusted);
 }
 
+// ===========================
+// 新增功能：光标锁定与事件拦截
+// ===========================
+
+// 1. 鼠标锁定 (冻结系统光标位置，但允许读取 Delta)
+Napi::Value SetMouseLock(const Napi::CallbackInfo& info) {
+    bool locked = info[0].As<Napi::Boolean>().Value();
+    // false = 解除关联(锁定光标), true = 恢复关联
+    CGAssociateMouseAndMouseCursorPosition(!locked);
+    return info.Env().Null();
+}
+
+// 2. 获取鼠标 Delta (自上次调用以来的移动量)
+Napi::Value GetMouseDelta(const Napi::CallbackInfo& info) {
+    int dx, dy;
+    CGGetLastMouseDelta(&dx, &dy);
+    
+    Napi::Object result = Napi::Object::New(info.Env());
+    result.Set("x", Napi::Number::New(info.Env(), dx));
+    result.Set("y", Napi::Number::New(info.Env(), dy));
+    return result;
+}
+
+// 3. 点击拦截器 (Trap)
+static CFMachPortRef clickTrapPort = NULL;
+static CFRunLoopSourceRef clickTrapSource = NULL;
+
+CGEventRef ClickTrapCallback(CGEventTapProxy proxy, CGEventType type, CGEventRef event, void *refcon) {
+    // 拦截所有点击事件，返回 NULL 吞噬掉
+    // 这样 uIOhook (HID level) 能收到，但系统窗口 (Session level) 收不到
+    return NULL;
+}
+
+Napi::Value SetClickTrap(const Napi::CallbackInfo& info) {
+    bool enable = info[0].As<Napi::Boolean>().Value();
+    
+    if (enable) {
+        if (!clickTrapPort) {
+            CGEventMask mask = CGEventMaskBit(kCGEventLeftMouseDown) |
+                               CGEventMaskBit(kCGEventLeftMouseUp) |
+                               CGEventMaskBit(kCGEventRightMouseDown) |
+                               CGEventMaskBit(kCGEventRightMouseUp) |
+                               CGEventMaskBit(kCGEventOtherMouseDown) |
+                               CGEventMaskBit(kCGEventOtherMouseUp);
+            
+            // 使用 Session Tap，优先级低于 HID (uIOhook)，高于 App
+            clickTrapPort = CGEventTapCreate(kCGSessionEventTap, kCGHeadInsertEventTap, kCGEventTapOptionDefault, mask, ClickTrapCallback, NULL);
+            
+            if (clickTrapPort) {
+                clickTrapSource = CFMachPortCreateRunLoopSource(kCFAllocatorDefault, clickTrapPort, 0);
+                CFRunLoopAddSource(CFRunLoopGetMain(), clickTrapSource, kCFRunLoopCommonModes);
+                CGEventTapEnable(clickTrapPort, true);
+            }
+        }
+    } else {
+        if (clickTrapPort) {
+            CGEventTapEnable(clickTrapPort, false);
+            CFRunLoopRemoveSource(CFRunLoopGetMain(), clickTrapSource, kCFRunLoopCommonModes);
+            CFRelease(clickTrapSource);
+            CFRelease(clickTrapPort);
+            clickTrapPort = NULL;
+            clickTrapSource = NULL;
+        }
+    }
+    return info.Env().Null();
+}
+
 Napi::Object Init(Napi::Env env, Napi::Object exports) {
-    exports.Set("moveMouse", Napi::Function::New(env, MoveMouse));
     exports.Set("moveMouseAbs", Napi::Function::New(env, MoveMouseAbs));
     exports.Set("clickMouse", Napi::Function::New(env, ClickMouse));
     exports.Set("keyEvent", Napi::Function::New(env, KeyEvent));
@@ -135,6 +168,10 @@ Napi::Object Init(Napi::Env env, Napi::Object exports) {
     exports.Set("warpMouse", Napi::Function::New(env, WarpMouse));
     exports.Set("setCursor", Napi::Function::New(env, SetCursor));
     exports.Set("checkAuth", Napi::Function::New(env, CheckAuth));
+    // 新增 API
+    exports.Set("setMouseLock", Napi::Function::New(env, SetMouseLock));
+    exports.Set("getMouseDelta", Napi::Function::New(env, GetMouseDelta));
+    exports.Set("setClickTrap", Napi::Function::New(env, SetClickTrap));
     return exports;
 }
 
