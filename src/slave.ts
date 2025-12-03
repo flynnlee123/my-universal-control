@@ -12,6 +12,7 @@ export function startSlave(native: any) {
         // 流式解包，msgpackr 支持 unpackMultiple 但这里简单处理
         // 如果数据包粘连严重，需要自行处理 buffer
         const msg = unpack(data);
+        console.log(msg);
 
         switch (msg.t) {
           case "m": // Move
