@@ -26,9 +26,15 @@ export function startMaster(native: any) {
   const primaryDisplay = screen.getPrimaryDisplay();
   const { width, height } = primaryDisplay.size;
   
-  // 虚拟光标坐标 (初始化为中心)
+  // 虚拟光标
   let vX = width / 2;
   let vY = height / 2;
+
+  // === 手动点击计数逻辑 ===
+  let lastClickTime = 0;
+  let clickCount = 0;
+  const DOUBLE_CLICK_DELAY = 400; // macOS 默认大概是 500ms，设 400ms 更稳
+  let lastButton = 0;
 
   const connect = () => {
     socket = new net.Socket();
@@ -48,53 +54,41 @@ export function startMaster(native: any) {
     if (isRemote) {
       console.log(">>> REMOTE MODE");
       
-      // 1. 初始化虚拟光标位置到当前鼠标位置，防止跳变
       const point = screen.getCursorScreenPoint();
       vX = point.x;
       vY = point.y;
 
-      // 2. 隐藏光标
+      // 1. 隐藏光标
       native.setCursor(false);
 
-      // 3. 锁定系统光标 (解决 Dock 栏误触问题)
-      // 系统光标将不再移动，也不会触发边缘手势
+      // 2. 锁定系统光标 (解决 Dock 栏误触)
       native.setMouseLock(true);
 
-      // 4. 开启点击拦截 (解决点击误触本地窗口问题)
+      // 3. 开启点击拦截 (防止误点 Master 窗口，会导致 uIOhook 的 clickCount 失效)
       native.setClickTrap(true);
 
-      // 5. 开启高频轮询获取 Delta 移动量 (比 uIOhook 事件更丝滑，且不依赖光标移动)
+      // 4. 开启轮询 Delta
       if (deltaTimer) clearInterval(deltaTimer);
       deltaTimer = setInterval(() => {
         const delta = native.getMouseDelta();
         if (delta.x !== 0 || delta.y !== 0) {
-          // 更新虚拟坐标
           vX += delta.x;
           vY += delta.y;
-
-          // 钳制范围
           vX = Math.max(0, Math.min(width, vX));
           vY = Math.max(0, Math.min(height, vY));
-
-          // 发送归一化坐标
           socket?.write(pack({ t: "m", x: vX / width, y: vY / height }));
         }
-      }, 16); // ~60fps
+      }, 16);
 
     } else {
       console.log("<<< LOCAL MODE");
       
-      // 1. 停止轮询
       if (deltaTimer) clearInterval(deltaTimer);
       deltaTimer = null;
 
-      // 2. 关闭拦截
       native.setClickTrap(false);
       native.setMouseLock(false);
       native.setCursor(true);
-      
-      // 3. 可选：将系统光标 Warp 到虚拟光标结束的位置，保持连贯性
-      // native.warpMouse(vX, vY);
     }
   };
 
@@ -111,22 +105,33 @@ export function startMaster(native: any) {
   uIOhook.on("input", (e: any) => {
     if (!isRemote || !socket) return;
 
-    // 注意：MOUSE_MOVED 我们改用 Polling 处理了，这里忽略 uIOhook 的移动事件
-    // 因为锁定了光标，uIOhook 可能会报告光标静止，或者报告的 delta 不够平滑
-
     // 1. 点击事件
     if (e.type === EVENT_TYPE.MOUSE_PRESSED) {
-      socket.write(pack({ t: "c", b: e.button, d: true, cl: e.clicks }));
+        const now = Date.now();
+        
+        // 判定是否是连击：时间间隔 < 阈值 且 按键相同
+        if (now - lastClickTime < DOUBLE_CLICK_DELAY && lastButton === e.button) {
+            clickCount++;
+        } else {
+            clickCount = 1;
+        }
+        
+        lastClickTime = now;
+        lastButton = e.button;
+
+        // 发送给 Slave，带上计算好的 clickCount
+        socket.write(pack({ t: "c", b: e.button, d: true, cl: clickCount }));
     } 
     else if (e.type === EVENT_TYPE.MOUSE_RELEASED) {
-      socket.write(pack({ t: "c", b: e.button, d: false, cl: e.clicks }));
+        // 松开时，clickCount 保持按下的状态
+        socket.write(pack({ t: "c", b: e.button, d: false, cl: clickCount }));
     }
 
-    // 2. 滚轮 (保持 uIOhook 处理)
+    // 2. 滚轮
     else if (e.type === EVENT_TYPE.MOUSE_WHEEL) {
       let delta = e.rotation;
       if (e.amount && e.amount > 0) delta *= e.amount;
-      delta = delta * -10; // 倍率 -10
+      delta = delta * -1; 
       if (e.direction === 3) socket.write(pack({ t: "s", dy: delta, dx: 0 }));
       else if (e.direction === 4) socket.write(pack({ t: "s", dy: 0, dx: delta }));
     }
