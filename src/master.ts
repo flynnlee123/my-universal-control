@@ -149,7 +149,7 @@ export function startMaster(native: any) {
       // Native 端已设置为 kCGScrollEventUnitPixel + Continuous
       // Apple Trackpad 通常发送很多小的 delta，普通滚轮发送大的 delta
       // -10 左右的倍率在 Pixel 模式下通常比较自然
-      delta = delta * -10; 
+      delta = delta * -3; 
 
       if (e.direction === 3) {
         socket.write(pack({ t: "s", dy: delta, dx: 0 }));
